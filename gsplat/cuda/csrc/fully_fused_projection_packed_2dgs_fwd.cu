@@ -108,6 +108,15 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
         const vec3<T> M1 = vec3<T>(M[1][0], M[1][1], M[1][2]);
         const vec3<T> M2 = vec3<T>(M[2][0], M[2][1], M[2][2]);
 
+        // #if TIGHTBBOX // no use in the paper, but it indeed help speeds.
+        //         // the effective extent is now depended on the opacity of
+        //         gaussian. float cutoff = sqrtf(max(9.f + 2.f *
+        //         logf(opacities[idx]), 0.000001));
+        // #else
+        //         float cutoff = 3.0f;
+        // #endif
+        //         const vec3<T> temp_point =
+        //             vec3<T>(cutoff * cutoff, cutoff * cutoff, -1.0f);
         const vec3<T> temp_point = vec3<T>(1.0f, 1.0f, -1.0f);
         const T distance = sum(temp_point * M2 * M2);
 
@@ -119,11 +128,17 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
 
         const vec2<T> temp = {sum(f * M0 * M0), sum(f * M1 * M1)};
         const vec2<T> half_extend = mean2d * mean2d - temp;
+        // radius = ceil(
+        //     max(sqrt(max(1e-4, max(half_extend.x, half_extend.y))),
+        //         cutoff * 0.707106)
+        // );
         radius = ceil(3.f * sqrt(max(1e-4, max(half_extend.x, half_extend.y))));
 
         if (radius <= radius_clip) {
             valid = false;
         }
+        if (radius > 10000)
+            valid = false;
 
         // mask out gaussians outside the image region
         if (mean2d.x + radius <= 0 || mean2d.x - radius >= image_width ||

@@ -40,6 +40,7 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
     // fwd outputs
     const S *__restrict__ render_colors,    // [C, image_height, image_width,
                                             // COLOR_DIM]
+    const S *__restrict__ render_depths,    // [C, image_height, image_width, 1]
     const S *__restrict__ render_alphas,    // [C, image_height, image_width, 1]
     const int32_t *__restrict__ last_ids,   // [C, image_height, image_width]     // the id to last gaussian that got intersected 
     const int32_t *__restrict__ median_ids, // [C, image_height, image_width]     // the id to the gaussian that brings the opacity over 0.5
@@ -47,6 +48,7 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
     // grad outputs
     const S *__restrict__ v_render_colors,  // [C, image_height, image_width,     // RGB
                                             // COLOR_DIM]
+    const S *__restrict__ v_render_depths,  // [C, image_height, image_width, 1]  // depths.
     const S *__restrict__ v_render_alphas,  // [C, image_height, image_width, 1]  // total opacities.
     const S *__restrict__ v_render_normals, // [C, image_height, image_width, 3]  // camera space normals
     const S *__restrict__ v_render_distort, // [C, image_height, image_width, 1]  // mip-nerf 360 distorts
@@ -80,6 +82,7 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
     median_ids += camera_id * image_height * image_width;
 
     v_render_colors += camera_id * image_height * image_width * COLOR_DIM;
+    v_render_depths += camera_id * image_height * image_width;
     v_render_alphas += camera_id * image_height * image_width;
     v_render_normals += camera_id * image_height * image_width * 3;
     v_render_median += camera_id * image_height * image_width;
@@ -149,6 +152,7 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
     // the contribution from gaussians behind the current one
     // this is used to compute d(alpha)/d(c_i)
     S buffer[COLOR_DIM] = {0.f};
+    S buffer_depths = 0.f;
     S buffer_normals[3] = {0.f};
 
     // index of last gaussian to contribute to this pixel
@@ -170,6 +174,9 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
     for (uint32_t k = 0; k < COLOR_DIM; ++k) {
         v_render_c[k] = v_render_colors[pix_id * COLOR_DIM + k];
     }
+
+    // FETCH DEPTH GRADIENT
+    const S v_render_d = v_render_depths[pix_id];
 
     // FETCH ALPHA GRADIENT
     const S v_render_a = v_render_alphas[pix_id];
@@ -283,6 +290,7 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
              * Forward pass variables
              * ==================================================
              */
+            vec3<S> hit_xyz; // ray-splat hit point in camera space
             S alpha;    // for the currently processed gaussian, per pixel
             S opac;     // opacity of the currently processed gaussian, per pixel
             S vis;      // visibility of the currently processed gaussian (the pure gaussian weight, not multiplied by opacity), per pixel
@@ -329,6 +337,13 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                 // 2D gaussian weight using the projected 2D mean
                 gauss_weight_2d = FILTER_INV_SQUARE * (d.x * d.x + d.y * d.y);
                 gauss_weight = min(gauss_weight_3d, gauss_weight_2d);
+
+                hit_xyz.z = (gauss_weight_3d <= gauss_weight_2d) ? s.x * w_M.x + s.y *w_M.y + w_M.z : w_M.z;
+                const S near_n = 0.05f; // TODO: use k_near
+                if(hit_xyz.z < near_n){
+                    valid = false;
+                }
+
 
                 // visibility and alpha
                 const S sigma = 0.5f * gauss_weight;
@@ -471,8 +486,18 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                  * 2DGS backward pass: compute gradients of d_out / d_G_i and d_G_i w.r.t geometry parameters
                  * ==================================================
                  */
+
+                /*
+                * d(depth_out) / d(alpha_i)
+                */
+                v_alpha += (hit_xyz.z * T - buffer_depths * ra) * v_render_d;
+
                 if (opac * vis <= 0.999f) {
-                    S v_depth = 0.f;
+                    /*
+                    * d(depth_out) / d(z_i)
+                    */
+                    // S v_depth = 0.f;
+                    S v_depth = fac * v_render_d;
                     // d(a_i * G_i) / d(G_i) = a_i
                     const S v_G = opac * v_alpha;
 
@@ -527,6 +552,11 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                 for (uint32_t k = 0; k < COLOR_DIM; ++k) {
                     buffer[k] += rgbs_batch[t * COLOR_DIM + k] * fac;
                 }
+
+                /**
+                 * Update the cumulative "later" gaussian contributions, used in derivatives of render with respect to alphas
+                 */
+                buffer_depths += hit_xyz.z * fac;
 
                 /**
                  * Update the cumulative "later" gaussian contributions, used in derivatives of output normals w.r.t. alphas
@@ -636,11 +666,13 @@ call_kernel_with_dim(
     // forward outputs
     const torch::Tensor
         &render_colors, // [C, image_height, image_width, COLOR_DIM]
+    const torch::Tensor &render_depths, // [C, image_height, image_width, 1]
     const torch::Tensor &render_alphas, // [C, image_height, image_width, 1]
     const torch::Tensor &last_ids,      // [C, image_height, image_width]
     const torch::Tensor &median_ids,    // [C, image_height, image_width]
     // gradients of outputs
     const torch::Tensor &v_render_colors,  // [C, image_height, image_width, 3]
+    const torch::Tensor &v_render_depths,  // [C, image_height, image_width, 1]
     const torch::Tensor &v_render_alphas,  // [C, image_height, image_width, 1]
     const torch::Tensor &v_render_normals, // [C, image_height, image_width, 3]
     const torch::Tensor &v_render_distort, // [C, image_height, image_width, 1]
@@ -659,10 +691,12 @@ call_kernel_with_dim(
     GSPLAT_CHECK_INPUT(tile_offsets);
     GSPLAT_CHECK_INPUT(flatten_ids);
     GSPLAT_CHECK_INPUT(render_colors);
+    GSPLAT_CHECK_INPUT(render_depths);
     GSPLAT_CHECK_INPUT(render_alphas);
     GSPLAT_CHECK_INPUT(last_ids);
     GSPLAT_CHECK_INPUT(median_ids);
     GSPLAT_CHECK_INPUT(v_render_colors);
+    GSPLAT_CHECK_INPUT(v_render_depths);
     GSPLAT_CHECK_INPUT(v_render_alphas);
     GSPLAT_CHECK_INPUT(v_render_normals);
     GSPLAT_CHECK_INPUT(v_render_distort);
@@ -740,10 +774,12 @@ call_kernel_with_dim(
                 tile_offsets.data_ptr<int32_t>(),
                 flatten_ids.data_ptr<int32_t>(),
                 render_colors.data_ptr<float>(),
+                render_depths.data_ptr<float>(),
                 render_alphas.data_ptr<float>(),
                 last_ids.data_ptr<int32_t>(),
                 median_ids.data_ptr<int32_t>(),
                 v_render_colors.data_ptr<float>(),
+                v_render_depths.data_ptr<float>(),
                 v_render_alphas.data_ptr<float>(),
                 v_render_normals.data_ptr<float>(),
                 v_render_distort.data_ptr<float>(),
@@ -800,11 +836,13 @@ rasterize_to_pixels_bwd_2dgs_tensor(
     // forward outputs
     const torch::Tensor
         &render_colors, // [C, image_height, image_width, COLOR_DIM]
+    const torch::Tensor &render_depths, // [C, image_height, image_width, 1]
     const torch::Tensor &render_alphas, // [C, image_height, image_width, 1]
     const torch::Tensor &last_ids,      // [C, image_height, image_width]
     const torch::Tensor &median_ids,    // [C, image_height, image_width]
     // gradients of outputs
     const torch::Tensor &v_render_colors,  // [C, image_height, image_width, 3]
+    const torch::Tensor &v_render_depths,  // [C, image_height, image_width, 1]
     const torch::Tensor &v_render_alphas,  // [C, image_height, image_width, 1]
     const torch::Tensor &v_render_normals, // [C, image_height, image_width, 3]
     const torch::Tensor &v_render_distort, // [C, image_height, image_width, 1]
@@ -833,10 +871,12 @@ rasterize_to_pixels_bwd_2dgs_tensor(
             tile_offsets,                                                      \
             flatten_ids,                                                       \
             render_colors,                                                     \
+            render_depths,                                                     \
             render_alphas,                                                     \
             last_ids,                                                          \
             median_ids,                                                        \
             v_render_colors,                                                   \
+            v_render_depths,                                                   \
             v_render_alphas,                                                   \
             v_render_normals,                                                  \
             v_render_distort,                                                  \
