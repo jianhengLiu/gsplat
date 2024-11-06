@@ -45,6 +45,7 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
     S *__restrict__ render_colors,  // [C, image_height, image_width, COLOR_DIM]
     S *__restrict__ render_depths,  // [C, image_height, image_width, 1]
     S *__restrict__ render_alphas,  // [C, image_height, image_width, 1]
+    S *__restrict__ render_Ts,  // [C, image_height, image_width, 2]
     S *__restrict__ render_normals, // [C, image_height, image_width, 3]
     S *__restrict__ render_distort, // [C, image_height, image_width, 1]  // Stores the per-pixel distortion error proposed in Mip-NeRF 360.
     S *__restrict__ render_median,  // [C, image_height, image_width, 1]  // Stores the median depth contribution for each pixel "set to the depth of the Gaussian that brings the accumulated opacity over 0.5."
@@ -73,6 +74,7 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
     render_colors += camera_id * image_height * image_width * COLOR_DIM;  // get the global offset of the pixel w.r.t the camera
     render_depths += camera_id * image_height * image_width;  // get the global offset of the pixel w.r.t the camera
     render_alphas += camera_id * image_height * image_width;  // get the global offset of the pixel w.r.t the camera
+    render_Ts += camera_id * image_height * image_width * 2; // get the global offset of the pixel w.r.t the camera
     last_ids += camera_id * image_height * image_width;  // get the global offset of the pixel w.r.t the camera
     render_normals += camera_id * image_height * image_width * 3;
     render_distort += camera_id * image_height * image_width;
@@ -181,6 +183,8 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
     //  S pix_out[COLOR_DIM + 3] = {0.f}
     S pix_out[COLOR_DIM] = {0.f};
     S depth_out = 0.f;
+    S M1 = 0.f;
+    S M2 = 0.f;
     S normal_out[3] = {0.f};
     for (uint32_t b = 0; b < num_batches; ++b) {
         // resync all threads before beginning next batch
@@ -296,11 +300,16 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
             // merge ray-intersection kernel and 2d gaussian kernel
             const S gauss_weight = min(gauss_weight_3d, gauss_weight_2d);
             vec3<S> hit_xyz;
-            hit_xyz.z = (gauss_weight_3d<gauss_weight_2d) ? s.x * w_M.x + s.y * w_M.y + w_M.z : w_M.z;
+            hit_xyz.z = (gauss_weight_3d < gauss_weight_2d) ? s.x * w_M.x + s.y * w_M.y + w_M.z : w_M.z;
             const S near_n = 0.05f; // TODO: use k_near
+            const S far_n = 100.f; // TODO: use k_near
             if(hit_xyz.z < near_n){
                 continue;
             }
+            // hit_xyz.x = (gauss_weight_3d < gauss_weight_2d) ? s.x * u_M.x + s.y * u_M.y + u_M.z : u_M.z;
+            // hit_xyz.x /= hit_xyz.z;
+            // hit_xyz.y = (gauss_weight_3d < gauss_weight_2d) ? s.x * v_M.x + s.y * v_M.y + v_M.z : v_M.z;
+            // hit_xyz.y /= hit_xyz.z;
 
             const S sigma = 0.5f * gauss_weight;
             // evaluation of the gaussian exponential term
@@ -325,7 +334,9 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
             for (uint32_t k = 0; k < COLOR_DIM; ++k) {
                 pix_out[k] += c_ptr[k] * vis;
             }
-            depth_out += hit_xyz.z * vis;
+
+            const S depth = hit_xyz.z;
+            depth_out += depth * vis;
 
             const S *n_ptr = normals + g * 3;
             GSPLAT_PRAGMA_UNROLL
@@ -336,15 +347,22 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
             if (render_distort != nullptr) {
                 // the last channel of colors is depth
                 // const S depth = c_ptr[COLOR_DIM - 1];
-                const S depth = hit_xyz.z;                
-                // in nerfacc, loss_bi_0 = weights * t_mids *
-                // exclusive_sum(weights)
-                const S distort_bi_0 = vis * depth * (1.0f - T);
-                // in nerfacc, loss_bi_1 = weights * exclusive_sum(weights *
-                // t_mids)
-                const S distort_bi_1 = vis * accum_vis_depth;
-                distort += 2.0f * (distort_bi_0 - distort_bi_1);
-                accum_vis_depth += vis * depth;
+
+                S A = 1.0f - T;
+                S m = far_n / (far_n - near_n) * (1 - near_n / depth);
+                distort += (m * m * A + M2 - 2 * m * M1) * vis;
+                M1 += m * vis;
+                M2 += m * m * vis;
+
+                // mipnerf not properly suited, as gs not depth order maybe, leads to minus number
+                // // in nerfacc, loss_bi_0 = weights * t_mids *
+                // // exclusive_sum(weights)
+                // const S distort_bi_0 = vis * depth * (1.0f - T);
+                // // in nerfacc, loss_bi_1 = weights * exclusive_sum(weights *
+                // // t_mids)
+                // const S distort_bi_1 = vis * accum_vis_depth;
+                // distort += 2.0f * (distort_bi_0 - distort_bi_1);
+                // accum_vis_depth += vis * depth;
             }
 
             // compute median depth
@@ -367,6 +385,8 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
         // slower so we stick with float for now.
         render_depths[pix_id] = depth_out;
         render_alphas[pix_id] = 1.0f - T;
+        render_Ts[pix_id] = M1;
+        render_Ts[pix_id + 1] = M2;
         GSPLAT_PRAGMA_UNROLL
         for (uint32_t k = 0; k < COLOR_DIM; ++k) {
             render_colors[pix_id * COLOR_DIM + k] =
@@ -392,6 +412,7 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
 
 template <uint32_t CDIM>
 std::tuple<
+    torch::Tensor,
     torch::Tensor,
     torch::Tensor,
     torch::Tensor,
@@ -458,6 +479,10 @@ call_kernel_with_dim(
         {C, image_height, image_width, 1},
         means2d.options().dtype(torch::kFloat32)
     );
+    torch::Tensor Ts = torch::empty(
+        {C, image_height, image_width, 2},
+        means2d.options().dtype(torch::kFloat32)
+    );
     torch::Tensor last_ids = torch::empty(
         {C, image_height, image_width}, means2d.options().dtype(torch::kInt32)
     );
@@ -522,6 +547,7 @@ call_kernel_with_dim(
             renders.data_ptr<float>(),
             depths.data_ptr<float>(),
             alphas.data_ptr<float>(),
+            Ts.data_ptr<float>(),
             render_normals.data_ptr<float>(),
             render_distort.data_ptr<float>(),
             render_median.data_ptr<float>(),
@@ -533,6 +559,7 @@ call_kernel_with_dim(
         renders,
         depths,
         alphas,
+        Ts,
         render_normals,
         render_distort,
         render_median,
@@ -542,6 +569,7 @@ call_kernel_with_dim(
 }
 
 std::tuple<
+    torch::Tensor,
     torch::Tensor,
     torch::Tensor,
     torch::Tensor,
