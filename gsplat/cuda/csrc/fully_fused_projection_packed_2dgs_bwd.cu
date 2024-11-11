@@ -1,7 +1,7 @@
+#include "2dgs.cuh"
 #include "bindings.h"
 #include "helpers.cuh"
 #include "transform.cuh"
-#include "2dgs.cuh"
 
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
@@ -33,11 +33,13 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
     // fwd outputs
     const int64_t *__restrict__ camera_ids,   // [nnz]
     const int64_t *__restrict__ gaussian_ids, // [nnz]
-    const T *__restrict__ ray_transforms,             // [nnz, 3]
+    const T *__restrict__ ray_transforms,     // [nnz, 3]
+    const T *__restrict__ randns,             // [nnz, 3]
     // grad outputs
     const T *__restrict__ v_means2d, // [nnz, 2]
     const T *__restrict__ v_depths,  // [nnz]
     const T *__restrict__ v_normals, // [nnz, 3]
+    const T *__restrict__ v_samples, // [nnz, 3]
     const bool sparse_grad, // whether the outputs are in COO format [nnz, ...]
     // grad inputs
     T *__restrict__ v_ray_transforms,
@@ -60,9 +62,11 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
     Ks += cid * 9;
 
     ray_transforms += idx * 9;
+    randns += idx * 3;
 
     v_means2d += idx * 2;
     v_normals += idx * 3;
+    v_samples += idx * 3;
     v_depths += idx;
     v_ray_transforms += idx * 9;
 
@@ -120,6 +124,24 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
         v_scale,
         v_mean
     );
+    vec3<T> v_sample = glm::make_vec3(v_samples);
+    vec3<T> randn = glm::make_vec3(randns);
+    v_mean += v_sample;
+    mat3<T> R_gs = quat_to_rotmat(quat);
+    v_scale[0] += glm::dot(v_sample, R_gs[0] * randn[0]);
+    v_scale[1] += glm::dot(v_sample, R_gs[1] * randn[1]);
+    mat3<T> v_R = mat3<T>(
+        v_sample[0] * scale[0] * randn[0],
+        v_sample[1] * scale[0] * randn[0],
+        v_sample[2] * scale[0] * randn[0],
+        v_sample[0] * scale[1] * randn[1],
+        v_sample[1] * scale[1] * randn[1],
+        v_sample[2] * scale[1] * randn[1],
+        0.0,
+        0.0,
+        0.0
+    );
+    quat_to_rotmat_vjp<T>(quat, v_R, v_quat);
 
     auto warp = cg::tiled_partition<32>(cg::this_thread_block());
     if (sparse_grad) {
@@ -181,14 +203,16 @@ fully_fused_projection_packed_bwd_2dgs_tensor(
     const uint32_t image_width,
     const uint32_t image_height,
     // fwd outputs
-    const torch::Tensor &camera_ids,   // [nnz]
-    const torch::Tensor &gaussian_ids, // [nnz]
-    const torch::Tensor &ray_transforms,       // [nnz, 3, 3]
+    const torch::Tensor &camera_ids,     // [nnz]
+    const torch::Tensor &gaussian_ids,   // [nnz]
+    const torch::Tensor &ray_transforms, // [nnz, 3, 3]
+    const torch::Tensor &randns,         // [nnz, 3]
     // grad outputs
-    const torch::Tensor &v_means2d, // [nnz, 2]
-    const torch::Tensor &v_depths,  // [nnz]
-    const torch::Tensor &v_ray_transforms,  // [nnz, 3, 3]
-    const torch::Tensor &v_normals, // [nnz, 3]
+    const torch::Tensor &v_means2d,        // [nnz, 2]
+    const torch::Tensor &v_depths,         // [nnz]
+    const torch::Tensor &v_ray_transforms, // [nnz, 3, 3]
+    const torch::Tensor &v_normals,        // [nnz, 3]
+    const torch::Tensor &v_samples,        // [nnz, 3]
     const bool viewmats_requires_grad,
     const bool sparse_grad
 ) {
@@ -202,10 +226,12 @@ fully_fused_projection_packed_bwd_2dgs_tensor(
     GSPLAT_CHECK_INPUT(camera_ids);
     GSPLAT_CHECK_INPUT(gaussian_ids);
     GSPLAT_CHECK_INPUT(ray_transforms);
+    GSPLAT_CHECK_INPUT(randns);
     GSPLAT_CHECK_INPUT(v_means2d);
     GSPLAT_CHECK_INPUT(v_depths);
     GSPLAT_CHECK_INPUT(v_normals);
     GSPLAT_CHECK_INPUT(v_ray_transforms);
+    GSPLAT_CHECK_INPUT(v_samples);
 
     uint32_t N = means.size(0);    // number of gaussians
     uint32_t C = viewmats.size(0); // number of cameras
@@ -254,9 +280,11 @@ fully_fused_projection_packed_bwd_2dgs_tensor(
                 camera_ids.data_ptr<int64_t>(),
                 gaussian_ids.data_ptr<int64_t>(),
                 ray_transforms.data_ptr<float>(),
+                randns.data_ptr<float>(),
                 v_means2d.data_ptr<float>(),
                 v_depths.data_ptr<float>(),
                 v_normals.data_ptr<float>(),
+                v_samples.data_ptr<float>(),
                 sparse_grad,
                 v_ray_transforms.data_ptr<float>(),
                 v_means.data_ptr<float>(),

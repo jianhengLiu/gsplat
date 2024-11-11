@@ -42,8 +42,10 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
     int32_t *__restrict__ radii,        // [nnz]
     T *__restrict__ means2d,            // [nnz, 2]
     T *__restrict__ depths,             // [nnz]
-    T *__restrict__ ray_transforms,             // [nnz, 3, 3]
-    T *__restrict__ normals             // [nnz, 3]
+    T *__restrict__ ray_transforms,     // [nnz, 3, 3]
+    T *__restrict__ normals,            // [nnz, 3]
+    T *__restrict__ randns,             // [nnz, 3]
+    T *__restrict__ samples             // [nnz, 3]
 ) {
     int32_t blocks_per_row = gridDim.x;
 
@@ -88,6 +90,7 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
     mat3<T> M;
     T radius;
     vec3<T> normal;
+    vec3<T> sample;
     if (valid) {
         // build ray transformation matrix and transform from world space to
         // camera space
@@ -97,7 +100,7 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
         mat3<T> RS_camera =
             R * quat_to_rotmat<T>(glm::make_vec4(quats)) *
             mat3<T>(scales[0], 0.0, 0.0, 0.0, scales[1], 0.0, 0.0, 0.0, 1.0);
-        ;
+
         mat3<T> WH = mat3<T>(RS_camera[0], RS_camera[1], mean_c);
 
         mat3<T> world_2_pix =
@@ -198,6 +201,19 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
             normals[thread_data * 3] = normal.x;
             normals[thread_data * 3 + 1] = normal.y;
             normals[thread_data * 3 + 2] = normal.z;
+
+            // sample point
+            mat3<T> RS_world =
+                quat_to_rotmat<T>(glm::make_vec4(quats)) *
+                mat3<T>(
+                    scales[0], 0.0, 0.0, 0.0, scales[1], 0.0, 0.0, 0.0, 1.0
+                );
+            sample = RS_world[0] * randns[thread_data * 3] +
+                     RS_world[1] * randns[thread_data * 3 + 1] +
+                     glm::make_vec3(means);
+            samples[thread_data * 3] = sample.x;
+            samples[thread_data * 3 + 1] = sample.y;
+            samples[thread_data * 3 + 2] = sample.z;
         }
         // lane 0 of the first block in each row writes the indptr
         if (threadIdx.x == 0 && block_col_idx == 0) {
@@ -212,6 +228,8 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
 }
 
 std::tuple<
+    torch::Tensor,
+    torch::Tensor,
     torch::Tensor,
     torch::Tensor,
     torch::Tensor,
@@ -280,6 +298,8 @@ fully_fused_projection_packed_fwd_2dgs_tensor(
                 nullptr,
                 nullptr,
                 nullptr,
+                nullptr,
+                nullptr,
                 nullptr
             );
         block_accum = torch::cumsum(block_cnts, 0, torch::kInt32);
@@ -298,6 +318,8 @@ fully_fused_projection_packed_fwd_2dgs_tensor(
     torch::Tensor depths = torch::empty({nnz}, means.options());
     torch::Tensor ray_transforms = torch::empty({nnz, 3, 3}, means.options());
     torch::Tensor normals = torch::empty({nnz, 3}, means.options());
+    torch::Tensor randns = torch::randn({nnz, 3}, means.options());
+    torch::Tensor samples = torch::empty({nnz, 3}, means.options());
 
     if (nnz) {
         fully_fused_projection_packed_fwd_2dgs_kernel<float>
@@ -323,7 +345,9 @@ fully_fused_projection_packed_fwd_2dgs_tensor(
                 means2d.data_ptr<float>(),
                 depths.data_ptr<float>(),
                 ray_transforms.data_ptr<float>(),
-                normals.data_ptr<float>()
+                normals.data_ptr<float>(),
+                randns.data_ptr<float>(),
+                samples.data_ptr<float>()
             );
     } else {
         indptr.fill_(0);
@@ -337,7 +361,9 @@ fully_fused_projection_packed_fwd_2dgs_tensor(
         means2d,
         depths,
         ray_transforms,
-        normals
+        normals,
+        randns,
+        samples
     );
 }
 

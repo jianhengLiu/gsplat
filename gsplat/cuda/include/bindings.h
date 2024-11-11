@@ -31,8 +31,7 @@
 
 namespace gsplat {
 
-enum CameraModelType
-{
+enum CameraModelType {
     PINHOLE = 0,
     ORTHO = 1,
     FISHEYE = 2,
@@ -348,13 +347,13 @@ fully_fused_projection_bwd_2dgs_tensor(
     const uint32_t image_width,
     const uint32_t image_height,
     // fwd outputs
-    const torch::Tensor &radii,  // [C, N]
+    const torch::Tensor &radii,          // [C, N]
     const torch::Tensor &ray_transforms, // [C, N, 3, 3]
     // grad outputs
-    const torch::Tensor &v_means2d, // [C, N, 2]
-    const torch::Tensor &v_depths,  // [C, N]
-    const torch::Tensor &v_normals, // [C, N, 3]
-    const torch::Tensor &v_ray_transforms,  // [C, N, 3, 3]
+    const torch::Tensor &v_means2d,        // [C, N, 2]
+    const torch::Tensor &v_depths,         // [C, N]
+    const torch::Tensor &v_normals,        // [C, N, 3]
+    const torch::Tensor &v_ray_transforms, // [C, N, 3, 3]
     const bool viewmats_requires_grad
 );
 
@@ -370,11 +369,11 @@ std::tuple<
     torch::Tensor>
 rasterize_to_pixels_fwd_2dgs_tensor(
     // Gaussian parameters
-    const torch::Tensor &means2d,   // [C, N, 2] or [nnz, 2]
-    const torch::Tensor &ray_transforms,    // [C, N, 3] or [nnz, 3]
-    const torch::Tensor &colors,    // [C, N, channels] or [nnz, channels]
-    const torch::Tensor &opacities, // [C, N]  or [nnz]
-    const torch::Tensor &normals,   // [C, N, 3] or [nnz, 3]
+    const torch::Tensor &means2d,        // [C, N, 2] or [nnz, 2]
+    const torch::Tensor &ray_transforms, // [C, N, 3] or [nnz, 3]
+    const torch::Tensor &colors,         // [C, N, channels] or [nnz, channels]
+    const torch::Tensor &opacities,      // [C, N]  or [nnz]
+    const torch::Tensor &normals,        // [C, N, 3] or [nnz, 3]
     const at::optional<torch::Tensor> &backgrounds, // [C, channels]
     const at::optional<torch::Tensor> &masks, // [C, tile_height, tile_width]
     // image size
@@ -396,11 +395,11 @@ std::tuple<
     torch::Tensor>
 rasterize_to_pixels_bwd_2dgs_tensor(
     // Gaussian parameters
-    const torch::Tensor &means2d,   // [C, N, 2] or [nnz, 2]
-    const torch::Tensor &ray_transforms,    // [C, N, 3, 3] or [nnz, 3, 3]
-    const torch::Tensor &colors,    // [C, N, 3] or [nnz, 3]
-    const torch::Tensor &opacities, // [C, N] or [nnz]
-    const torch::Tensor &normals,   // [C, N, 3] or [nnz, 3],
+    const torch::Tensor &means2d,        // [C, N, 2] or [nnz, 2]
+    const torch::Tensor &ray_transforms, // [C, N, 3, 3] or [nnz, 3, 3]
+    const torch::Tensor &colors,         // [C, N, 3] or [nnz, 3]
+    const torch::Tensor &opacities,      // [C, N] or [nnz]
+    const torch::Tensor &normals,        // [C, N, 3] or [nnz, 3],
     const torch::Tensor &densify,
     const at::optional<torch::Tensor> &backgrounds, // [C, 3]
     const at::optional<torch::Tensor> &masks, // [C, tile_height, tile_width]
@@ -416,7 +415,7 @@ rasterize_to_pixels_bwd_2dgs_tensor(
         &render_colors, // [C, image_height, image_width, COLOR_DIM]
     const torch::Tensor &render_depths, // [C, image_height, image_width, 1]
     const torch::Tensor &render_alphas, // [C, image_height, image_width, 1]
-    const torch::Tensor &render_Ts, // [C, image_height, image_width, 2]
+    const torch::Tensor &render_Ts,     // [C, image_height, image_width, 2]
     const torch::Tensor &last_ids,      // [C, image_height, image_width]
     const torch::Tensor &median_ids,    // [C, image_height, image_width]
     // gradients of outputs
@@ -436,9 +435,9 @@ rasterize_to_indices_in_range_2dgs_tensor(
     const uint32_t range_end,           // iteration steps
     const torch::Tensor transmittances, // [C, image_height, image_width]
     // Gaussian parameters
-    const torch::Tensor &means2d,   // [C, N, 2]
-    const torch::Tensor &ray_transforms,    // [C, N, 3, 3]
-    const torch::Tensor &opacities, // [C, N]
+    const torch::Tensor &means2d,        // [C, N, 2]
+    const torch::Tensor &ray_transforms, // [C, N, 3, 3]
+    const torch::Tensor &opacities,      // [C, N]
     // image size
     const uint32_t image_width,
     const uint32_t image_height,
@@ -449,6 +448,8 @@ rasterize_to_indices_in_range_2dgs_tensor(
 );
 
 std::tuple<
+    torch::Tensor,
+    torch::Tensor,
     torch::Tensor,
     torch::Tensor,
     torch::Tensor,
@@ -481,14 +482,16 @@ fully_fused_projection_packed_bwd_2dgs_tensor(
     const uint32_t image_width,
     const uint32_t image_height,
     // fwd outputs
-    const torch::Tensor &camera_ids,   // [nnz]
-    const torch::Tensor &gaussian_ids, // [nnz]
-    const torch::Tensor &ray_transforms,       // [nnz, 3, 3]
+    const torch::Tensor &camera_ids,     // [nnz]
+    const torch::Tensor &gaussian_ids,   // [nnz]
+    const torch::Tensor &ray_transforms, // [nnz, 3, 3]
+    const torch::Tensor &randns,         // [nnz, 3]
     // grad outputs
-    const torch::Tensor &v_means2d, // [nnz, 2]
-    const torch::Tensor &v_depths,  // [nnz]
-    const torch::Tensor &v_normals, // [nnz, 3]
-    const torch::Tensor &v_ray_transforms,  // [nnz, 3, 3]
+    const torch::Tensor &v_means2d,        // [nnz, 2]
+    const torch::Tensor &v_depths,         // [nnz]
+    const torch::Tensor &v_ray_transforms, // [nnz, 3, 3]
+    const torch::Tensor &v_normals,        // [nnz, 3]
+    const torch::Tensor &v_samples,        // [nnz, 3]
     const bool viewmats_requires_grad,
     const bool sparse_grad
 );
@@ -504,7 +507,8 @@ void selective_adam_update(
     const float b2,
     const float eps,
     const uint32_t N,
-    const uint32_t M);
+    const uint32_t M
+);
 
 } // namespace gsplat
 
