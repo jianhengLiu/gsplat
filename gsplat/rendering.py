@@ -1465,4 +1465,4 @@ def rasterization_2dgs_inria_wrapper(
         "n_cameras": C,
         "gaussian_ids": None,
     }
-    return (render_colors, render_alphas), meta
+    return render_colors, render_alphas, meta

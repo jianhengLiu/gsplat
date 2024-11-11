@@ -482,10 +482,16 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                     const S far_n = 100.f; // TODO: use k_near
                     S m = far_n / (far_n - near_n) * (1 - near_n / depth);
                     S dm_ddepth = (far_n * near_n) / ((far_n - near_n) * depth * depth);
+
+                    final_A -= fac;
+                    final_D -= m * fac;
+                    final_D2 -= m * m * fac;
                     S dl_dw = (final_D2 + m * m * final_A - 2 * m * final_D) * v_distort;
-                    v_alpha += dl_dw - last_dL_dT;
+                    S dw_dalpha = final_A;
+                    v_alpha += dl_dw * dw_dalpha;
+                    // v_alpha += dl_dw - last_dL_dT;
                     last_dL_dT = dl_dw * alpha + (1 - alpha) * last_dL_dT;
-                    const S dl_dm = 2.0f * fac* (m * final_A - final_D) * v_distort;
+                    const S dl_dm = 2.0f * (fac* m * final_A - final_D) * v_distort;
                     v_depth += dl_dm * dm_ddepth;
 
                     // S dl_dw =

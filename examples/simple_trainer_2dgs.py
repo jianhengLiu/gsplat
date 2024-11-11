@@ -13,8 +13,8 @@ import torch.nn.functional as F
 import tqdm
 import tyro
 import viser
-from datasets.colmap import Dataset, Parser
-from datasets.traj import generate_interpolated_path
+from examples.datasets.colmap import Dataset, Parser
+from examples.datasets.traj import generate_interpolated_path
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
@@ -160,7 +160,7 @@ class Config:
     dist_start_iter: int = 3_000
 
     # Model for splatting.
-    model_type: Literal["2dgs", "2dgs-inria"] = "2dgs"
+    model_type: Literal["2dgs", "2dgs-inria"] = "2dgs-inria"
 
     # Dump information to tensorboard every this steps
     tb_every: int = 100
@@ -451,12 +451,12 @@ class Runner:
                 sparse_grad=self.cfg.sparse_grad,
                 **kwargs,
             )
-            render_colors, render_alphas = renders
+            # render_colors, render_alphas = renders
             render_normals = info["normals_rend"]
             normals_from_depth = info["normals_surf"]
             render_distort = info["render_distloss"]
             render_median = render_colors[..., 3]
-
+        print(info["radii"].max())
         return (
             render_colors,
             render_alphas,
