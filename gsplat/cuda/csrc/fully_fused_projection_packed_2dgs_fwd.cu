@@ -141,8 +141,8 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
         if (radius <= radius_clip) {
             valid = false;
         }
-        if (radius > 10000)
-            valid = false;
+        // if (radius > 10000)
+        //     valid = false;
 
         // mask out gaussians outside the image region
         if (mean2d.x + radius <= 0 || mean2d.x - radius >= image_width ||
