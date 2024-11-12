@@ -44,7 +44,7 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
     T *__restrict__ depths,             // [nnz]
     T *__restrict__ ray_transforms,     // [nnz, 3, 3]
     T *__restrict__ normals,            // [nnz, 3]
-    T *__restrict__ randns,             // [nnz, 3]
+    T *__restrict__ randns,             // [nnz, 2]
     T *__restrict__ samples             // [nnz, 3]
 ) {
     int32_t blocks_per_row = gridDim.x;
@@ -208,8 +208,8 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
                 mat3<T>(
                     scales[0], 0.0, 0.0, 0.0, scales[1], 0.0, 0.0, 0.0, 1.0
                 );
-            sample = RS_world[0] * randns[thread_data * 3] +
-                     RS_world[1] * randns[thread_data * 3 + 1] +
+            sample = RS_world[0] * randns[thread_data * 2] +
+                     RS_world[1] * randns[thread_data * 2 + 1] +
                      glm::make_vec3(means);
             samples[thread_data * 3] = sample.x;
             samples[thread_data * 3 + 1] = sample.y;
@@ -318,7 +318,7 @@ fully_fused_projection_packed_fwd_2dgs_tensor(
     torch::Tensor depths = torch::empty({nnz}, means.options());
     torch::Tensor ray_transforms = torch::empty({nnz, 3, 3}, means.options());
     torch::Tensor normals = torch::empty({nnz, 3}, means.options());
-    torch::Tensor randns = torch::randn({nnz, 3}, means.options());
+    torch::Tensor randns = torch::randn({nnz, 2}, means.options());
     torch::Tensor samples = torch::empty({nnz, 3}, means.options());
 
     if (nnz) {

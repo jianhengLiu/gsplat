@@ -34,7 +34,7 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
     const int64_t *__restrict__ camera_ids,   // [nnz]
     const int64_t *__restrict__ gaussian_ids, // [nnz]
     const T *__restrict__ ray_transforms,     // [nnz, 3]
-    const T *__restrict__ randns,             // [nnz, 3]
+    const T *__restrict__ randns,             // [nnz, 2]
     // grad outputs
     const T *__restrict__ v_means2d, // [nnz, 2]
     const T *__restrict__ v_depths,  // [nnz]
@@ -62,7 +62,7 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
     Ks += cid * 9;
 
     ray_transforms += idx * 9;
-    randns += idx * 3;
+    randns += idx * 2;
 
     v_means2d += idx * 2;
     v_normals += idx * 3;
@@ -125,7 +125,7 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
         v_mean
     );
     vec3<T> v_sample = glm::make_vec3(v_samples);
-    vec3<T> randn = glm::make_vec3(randns);
+    vec2<T> randn = glm::make_vec2(randns);
     v_mean += v_sample;
     mat3<T> R_gs = quat_to_rotmat(quat);
     v_scale[0] += glm::dot(v_sample, R_gs[0] * randn[0]);
@@ -206,7 +206,7 @@ fully_fused_projection_packed_bwd_2dgs_tensor(
     const torch::Tensor &camera_ids,     // [nnz]
     const torch::Tensor &gaussian_ids,   // [nnz]
     const torch::Tensor &ray_transforms, // [nnz, 3, 3]
-    const torch::Tensor &randns,         // [nnz, 3]
+    const torch::Tensor &randns,         // [nnz, 2]
     // grad outputs
     const torch::Tensor &v_means2d,        // [nnz, 2]
     const torch::Tensor &v_depths,         // [nnz]
