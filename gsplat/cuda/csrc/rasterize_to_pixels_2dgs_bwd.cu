@@ -197,8 +197,8 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
 
     S last_dL_dT = 0.f;
     S final_A = 1.f - T_final;
-    S final_D = inside ? render_Ts[pix_id] : 0.0f;
-    S final_D2 = inside ? render_Ts[pix_id + 1] : 0.0f;
+    S final_B = inside ? render_Ts[pix_id] : 0.0f;
+    S final_C = inside ? render_Ts[pix_id + 1] : 0.0f;
     if (v_render_distort != nullptr) {
         v_distort = v_render_distort[pix_id];
         // last channel of render_colors is accumulated depth
@@ -298,7 +298,7 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
              * Forward pass variables
              * ==================================================
              */
-            vec3<S> hit_xyz; // ray-splat hit point in camera space
+            S depth; // ray-splat hit point in camera space
             S alpha;    // for the currently processed gaussian, per pixel
             S opac;     // opacity of the currently processed gaussian, per pixel
             S vis;      // visibility of the currently processed gaussian (the pure gaussian weight, not multiplied by opacity), per pixel
@@ -346,9 +346,10 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                 gauss_weight_2d = FILTER_INV_SQUARE * (d.x * d.x + d.y * d.y);
                 gauss_weight = min(gauss_weight_3d, gauss_weight_2d);
 
-                hit_xyz.z = (gauss_weight_3d <= gauss_weight_2d) ? s.x * w_M.x + s.y *w_M.y + w_M.z : w_M.z;
+                depth = (gauss_weight_3d <= gauss_weight_2d) ? s.x * w_M.x + s.y *w_M.y + w_M.z : w_M.z;
+                // depth = s.x * w_M.x + s.y *w_M.y + w_M.z;
                 const S near_n = 0.05f; // TODO: use k_near
-                if(hit_xyz.z < near_n){
+                if(depth < near_n){
                     valid = false;
                 }
 
@@ -477,21 +478,23 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                 if (v_render_distort != nullptr) {
                     // last channel of colors is depth
                     // S depth = rgbs_batch[t * COLOR_DIM + COLOR_DIM - 1];
-                    S depth = hit_xyz.z;
                     const S near_n = 0.05f; // TODO: use k_near
                     const S far_n = 100.f; // TODO: use k_near
                     S m = far_n / (far_n - near_n) * (1 - near_n / depth);
                     S dm_ddepth = (far_n * near_n) / ((far_n - near_n) * depth * depth);
-
+                    
                     final_A -= fac;
-                    final_D -= m * fac;
-                    final_D2 -= m * m * fac;
-                    S dl_dw = (final_D2 + m * m * final_A - 2 * m * final_D) * v_distort;
-                    S dw_dalpha = final_A;
-                    v_alpha += dl_dw * dw_dalpha;
-                    // v_alpha += dl_dw - last_dL_dT;
-                    last_dL_dT = dl_dw * alpha + (1 - alpha) * last_dL_dT;
-                    const S dl_dm = 2.0f * (fac* m * final_A - final_D) * v_distort;
+                    final_B -= m * m * fac;
+                    final_C -= m * fac;
+                    // S dl_dw = (m * m * final_A + final_B - 2 * m * final_C) * v_distort;
+                    // S dw_dalpha = final_A;
+                    // v_alpha += dl_dw * dw_dalpha;
+                    // // v_alpha += dl_dw - last_dL_dT;
+                    // last_dL_dT = dl_dw * alpha + (1 - alpha) * last_dL_dT;
+
+                    // redidual_dL_dw += fac * ()
+                    // redidual_dL_dm +=
+                    const S dl_dm = 2.0f * fac * (m * final_A - final_C) * v_distort;
                     v_depth += dl_dm * dm_ddepth;
 
                     // S dl_dw =
@@ -520,7 +523,7 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                 /*
                 * d(depth_out) / d(alpha_i)
                 */
-                v_alpha += (hit_xyz.z * T - buffer_depths * ra) * v_render_d;
+                v_alpha += (depth * T - buffer_depths * ra) * v_render_d;
 
                 if (opac * vis <= 0.999f) {
                     /*
@@ -586,7 +589,7 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                 /**
                  * Update the cumulative "later" gaussian contributions, used in derivatives of render with respect to alphas
                  */
-                buffer_depths += hit_xyz.z * fac;
+                buffer_depths += depth * fac;
 
                 /**
                  * Update the cumulative "later" gaussian contributions, used in derivatives of output normals w.r.t. alphas

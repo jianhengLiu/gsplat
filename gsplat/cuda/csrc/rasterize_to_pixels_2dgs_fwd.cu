@@ -298,17 +298,14 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
             
             // merge ray-intersection kernel and 2d gaussian kernel
             const S gauss_weight = min(gauss_weight_3d, gauss_weight_2d);
-            vec3<S> hit_xyz;
-            hit_xyz.z = (gauss_weight_3d < gauss_weight_2d) ? s.x * w_M.x + s.y * w_M.y + w_M.z : w_M.z;
+            
+            S depth = (gauss_weight_3d < gauss_weight_2d) ? s.x * w_M.x + s.y * w_M.y + w_M.z : w_M.z;
+            // S depth = s.x * w_M.x + s.y * w_M.y + w_M.z;
             const S near_n = 0.05f; // TODO: use k_near
             const S far_n = 100.f; // TODO: use k_near
-            if(hit_xyz.z < near_n){
+            if(depth < near_n){
                 continue;
             }
-            // hit_xyz.x = (gauss_weight_3d < gauss_weight_2d) ? s.x * u_M.x + s.y * u_M.y + u_M.z : u_M.z;
-            // hit_xyz.x /= hit_xyz.z;
-            // hit_xyz.y = (gauss_weight_3d < gauss_weight_2d) ? s.x * v_M.x + s.y * v_M.y + v_M.z : v_M.z;
-            // hit_xyz.y /= hit_xyz.z;
 
             const S sigma = 0.5f * gauss_weight;
             // evaluation of the gaussian exponential term
@@ -334,7 +331,6 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
                 pix_out[k] += c_ptr[k] * vis;
             }
 
-            const S depth = hit_xyz.z;
             depth_out += depth * vis;
 
             const S *n_ptr = normals + g * 3;
@@ -350,8 +346,8 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
                 S A = 1.0f - T;
                 S m = far_n / (far_n - near_n) * (1 - near_n / depth);
                 distort += (m * m * A + M2 - 2 * m * M1) * vis;
-                M1 += m * vis;
-                M2 += m * m * vis;
+                M1 += m * m * vis;
+                M2 += m * vis;
 
                 // mipnerf not properly suited, as gs not depth order maybe, leads to minus number
                 // // in nerfacc, loss_bi_0 = weights * t_mids *
@@ -367,7 +363,7 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
             // compute median depth
             if (T > 0.5) {
                 // median_depth = c_ptr[COLOR_DIM - 1];
-                median_depth = hit_xyz.z;
+                median_depth = depth;
                 median_idx = batch_start + t;
             }
 
