@@ -193,9 +193,9 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
     // PREPARE FOR DISTORTION (IF DISTORSION LOSS ENABLED)
     S v_distort = 0.f;
     S accum_d, accum_w;
-    S accum_d_buffer, accum_w_buffer, distort_buffer;
+    S accum_d_buffer, accum_w_buffer;
 
-    S last_dL_dT = 0.f;
+    S last_dl_dT = 0.f;
     S final_A = 1.f - T_final;
     S final_B = inside ? render_Ts[pix_id] : 0.0f;
     S final_C = inside ? render_Ts[pix_id + 1] : 0.0f;
@@ -207,7 +207,6 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
         accum_d = accum_d_buffer;
         accum_w_buffer = render_alphas[pix_id];
         accum_w = accum_w_buffer;
-        distort_buffer = 0.f;
     }
 
     // median depth gradients
@@ -477,42 +476,20 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                 // contribution from distortion
                 if (v_render_distort != nullptr) {
                     // last channel of colors is depth
-                    // S depth = rgbs_batch[t * COLOR_DIM + COLOR_DIM - 1];
                     const S near_n = 0.05f; // TODO: use k_near
                     const S far_n = 100.f; // TODO: use k_near
                     S m = far_n / (far_n - near_n) * (1 - near_n / depth);
+                    // S m = depth;
                     S dm_ddepth = (far_n * near_n) / ((far_n - near_n) * depth * depth);
-                    
-                    final_A -= fac;
-                    final_B -= m * m * fac;
-                    final_C -= m * fac;
-                    // S dl_dw = (m * m * final_A + final_B - 2 * m * final_C) * v_distort;
-                    // S dw_dalpha = final_A;
-                    // v_alpha += dl_dw * dw_dalpha;
-                    // // v_alpha += dl_dw - last_dL_dT;
-                    // last_dL_dT = dl_dw * alpha + (1 - alpha) * last_dL_dT;
 
-                    // redidual_dL_dw += fac * ()
-                    // redidual_dL_dm +=
                     const S dl_dm = 2.0f * fac * (m * final_A - final_C) * v_distort;
                     v_depth += dl_dm * dm_ddepth;
-
-                    // S dl_dw =
-                    //     2.0f *
-                    //     (2.0f * (depth * accum_w_buffer - accum_d_buffer) +
-                    //      (accum_d - depth * accum_w));
-                    // // df / d(alpha)
-                    // v_alpha += (dl_dw * T - distort_buffer * ra) * v_distort;
-                    // accum_d_buffer -= fac * depth;
-                    // accum_w_buffer -= fac;
-                    // distort_buffer += dl_dw * fac;
-                    // // df / d(depth). put it in the last channel of v_rgb
-                    // // v_rgb_local[COLOR_DIM - 1] +=
-                    // //     2.0f * fac * (2.0f - 2.0f * T - accum_w + fac) *
-                    // //     v_distort;
-                    // v_depth +=
-                    //     2.0f * fac * (2.0f - 2.0f * T - accum_w + fac) *
-                    //     v_distort;
+                    // v_depth += 2.0f * fac * (m * final_A - final_C) * v_distort;
+                    
+                    // extremely unstable
+                    // S dl_dw = (m * m * final_A + final_B - 2 * m * final_C) * v_distort;
+                    // v_alpha += dl_dw - last_dl_dT; 
+                    // last_dl_dT = dl_dw * alpha + (1.0f - alpha) * last_dl_dT;
                 }
 
                 /** ==================================================

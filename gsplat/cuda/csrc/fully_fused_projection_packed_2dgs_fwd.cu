@@ -141,8 +141,8 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
         if (radius <= radius_clip) {
             valid = false;
         }
-        // if (radius > 10000)
-        //     valid = false;
+        if (radius > 10000)
+            valid = false;
 
         // mask out gaussians outside the image region
         if (mean2d.x + radius <= 0 || mean2d.x - radius >= image_width ||
@@ -318,7 +318,9 @@ fully_fused_projection_packed_fwd_2dgs_tensor(
     torch::Tensor depths = torch::empty({nnz}, means.options());
     torch::Tensor ray_transforms = torch::empty({nnz, 3, 3}, means.options());
     torch::Tensor normals = torch::empty({nnz, 3}, means.options());
-    torch::Tensor randns = torch::randn({nnz, 2}, means.options());
+    // torch::Tensor randns = torch::randn({nnz, 2}, means.options());
+    torch::Tensor randns =
+        2.0f * (torch::rand({nnz, 2}, means.options()) - 0.5f);
     torch::Tensor samples = torch::empty({nnz, 3}, means.options());
 
     if (nnz) {

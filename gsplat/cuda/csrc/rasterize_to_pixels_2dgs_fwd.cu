@@ -345,7 +345,8 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
 
                 S A = 1.0f - T;
                 S m = far_n / (far_n - near_n) * (1 - near_n / depth);
-                distort += (m * m * A + M2 - 2 * m * M1) * vis;
+                // S m = depth;
+                distort += (m * m * A + M1 - 2 * m * M2) * vis;
                 M1 += m * m * vis;
                 M2 += m * vis;
 
