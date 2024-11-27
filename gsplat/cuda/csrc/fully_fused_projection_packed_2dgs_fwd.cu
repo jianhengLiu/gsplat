@@ -203,13 +203,9 @@ __global__ void fully_fused_projection_packed_fwd_2dgs_kernel(
             normals[thread_data * 3 + 2] = normal.z;
 
             // sample point
-            mat3<T> RS_world =
-                quat_to_rotmat<T>(glm::make_vec4(quats)) *
-                mat3<T>(
-                    scales[0], 0.0, 0.0, 0.0, scales[1], 0.0, 0.0, 0.0, 1.0
-                );
-            sample = RS_world[0] * randns[thread_data * 2] +
-                     RS_world[1] * randns[thread_data * 2 + 1] +
+            mat3<T> R_world = quat_to_rotmat<T>(glm::make_vec4(quats));
+            sample = R_world[0] * scales[0] * randns[thread_data * 2] +
+                     R_world[1] * scales[1] * randns[thread_data * 2 + 1] +
                      glm::make_vec3(means);
             samples[thread_data * 3] = sample.x;
             samples[thread_data * 3 + 1] = sample.y;
