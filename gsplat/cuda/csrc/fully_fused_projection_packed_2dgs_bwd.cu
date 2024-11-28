@@ -129,8 +129,8 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
     v_mean += v_sample;
     mat3<T> R_gs = quat_to_rotmat(quat);
     // scale weigth to much to make splat too thin
-    // v_scale[0] += glm::dot(v_sample, R_gs[0] * randn[0]);
-    // v_scale[1] += glm::dot(v_sample, R_gs[1] * randn[1]);
+    v_scale[0] += glm::dot(v_sample, R_gs[0] * randn[0]);
+    v_scale[1] += glm::dot(v_sample, R_gs[1] * randn[1]);
     vec2<T> srandn = randn * scale;
     mat3<T> v_R = mat3<T>(
         // First column
