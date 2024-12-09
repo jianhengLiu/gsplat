@@ -56,7 +56,7 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
     const S *__restrict__ v_render_median,  // [C, image_height, image_width, 1]  // the median depth
 
     // grad inputs
-    vec4<S> *__restrict__ v_means2d_abs, // [C, N, 4] or [nnz, 4]
+    vec2<S> *__restrict__ v_means2d_abs, // [C, N, 2] or [nnz, 2]
     vec2<S> *__restrict__ v_means2d,     // [C, N, 2] or [nnz, 2]
     S *__restrict__ v_ray_transforms,            // [C, N, 3, 3] or [nnz, 3, 3]
     S *__restrict__ v_colors,    // [C, N, COLOR_DIM] or [nnz, COLOR_DIM]
@@ -392,7 +392,7 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
             vec2<S> v_xy_local = {0.f, 0.f};
             
             // absolute 2D mean gradients, used if 2d gaussian weight is applied
-            vec4<S> v_xy_abs_local = {0.f, 0.f, 0.f, 0.f};
+            vec2<S> v_xy_abs_local = {0.f, 0.f};
 
             // opacity gradients
             S v_opacity_local = 0.f;
@@ -545,15 +545,12 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                         // computing the derivative of G_i w.r.t. 2d projected gaussian parameters (trivial)
                         const S v_G_ddelx = -vis * FILTER_INV_SQUARE * d.x;
                         const S v_G_ddely = -vis * FILTER_INV_SQUARE * d.y;
-                        const S ddelx_dx = 0.5 * image_width;
-                        const S ddely_dy = 0.5 * image_height;
-
                         v_xy_local = {v_G * v_G_ddelx, v_G * v_G_ddely};
-                        if (v_means2d_abs != nullptr) {
-                            v_xy_abs_local = {
-                                abs(v_xy_local.x), abs(v_xy_local.y), abs(v_xy_local.x * ddelx_dx), abs(v_xy_local.y * ddely_dy)
-                            };
-                        }
+                        // if (v_means2d_abs != nullptr) {
+                        //     v_xy_abs_local = {
+                        //         abs(v_xy_local.x), abs(v_xy_local.y)
+                        //     };
+                        // }
                     }
                     v_opacity_local = vis * v_alpha;
                 }
@@ -631,11 +628,9 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                 gpuAtomicAdd(v_xy_ptr + 1, v_xy_local.y);
 
                 if (v_means2d_abs != nullptr) {
-                    S *v_xy_abs_ptr = (S *)(v_means2d_abs) + 4 * g;
-                    gpuAtomicAdd(v_xy_abs_ptr, v_xy_abs_local.x);
-                    gpuAtomicAdd(v_xy_abs_ptr + 1, v_xy_abs_local.y);
-                    gpuAtomicAdd(v_xy_abs_ptr + 2, v_xy_abs_local.z);
-                    gpuAtomicAdd(v_xy_abs_ptr + 3, v_xy_abs_local.w);
+                    S *v_xy_abs_ptr = (S *)(v_means2d_abs) + 2 * g;
+                    gpuAtomicAdd(v_xy_abs_ptr, abs(v_u_M_local.z * w_M.z));
+                    gpuAtomicAdd(v_xy_abs_ptr + 1, abs(v_v_M_local.z * w_M.z));
                 }
 
                 gpuAtomicAdd(v_opacities + g, v_opacity_local);
@@ -746,10 +741,7 @@ call_kernel_with_dim(
     torch::Tensor v_opacities = torch::zeros_like(opacities);
     torch::Tensor v_means2d_abs;
     if (absgrad) {
-        // v_means2d_abs = torch::zeros_like(means2d);
-        auto means2d_abs_sizes = means2d.sizes().vec();
-        means2d_abs_sizes[means2d.dim() - 1] = 4;
-        v_means2d_abs = torch::zeros(means2d_abs_sizes,means2d.options());
+        v_means2d_abs = torch::zeros_like(means2d);
     }
     torch::Tensor v_densify = torch::zeros_like(densify);
 
@@ -805,7 +797,7 @@ call_kernel_with_dim(
                 v_render_normals.data_ptr<float>(),
                 v_render_distort.data_ptr<float>(),
                 v_render_median.data_ptr<float>(),
-                absgrad ? reinterpret_cast<vec4<float> *>(
+                absgrad ? reinterpret_cast<vec2<float> *>(
                               v_means2d_abs.data_ptr<float>()
                           )
                         : nullptr,
