@@ -4,6 +4,7 @@
 #include <cooperative_groups.h>
 #include <cub/cub.cuh>
 #include <cuda_runtime.h>
+#include <ATen/cuda/Atomic.cuh>
 
 namespace gsplat {
 
@@ -49,7 +50,8 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
     S *__restrict__ render_distort, // [C, image_height, image_width, 1]  // Stores the per-pixel distortion error proposed in Mip-NeRF 360.
     S *__restrict__ render_median,  // [C, image_height, image_width, 1]  // Stores the median depth contribution for each pixel "set to the depth of the Gaussian that brings the accumulated opacity over 0.5."
     int32_t *__restrict__ last_ids, // [C, image_height, image_width]     // Stores the index of the last Gaussian that contributed to each pixel.
-    int32_t *__restrict__ median_ids // [C, image_height, image_width]    // Stores the index of the Gaussian that contributes to the median depth for each pixel (bring over 0.5).
+    int32_t *__restrict__ median_ids, // [C, image_height, image_width]    // Stores the index of the Gaussian that contributes to the median depth for each pixel (bring over 0.5).
+    S *__restrict__ visibilities // [C, N, 1] if packed is False, [nnz, 1]
 ) {
     // each thread draws one pixel, but also timeshares caching gaussians in a
     // shared tile
@@ -325,6 +327,7 @@ __global__ void rasterize_to_pixels_fwd_2dgs_kernel(
             // run volumetric rendering..
             int32_t g = id_batch[t];
             const S vis = alpha * T;
+            gpuAtomicAdd(&visibilities[g], vis);
             const S *c_ptr = colors + g * COLOR_DIM;
             GSPLAT_PRAGMA_UNROLL
             for (uint32_t k = 0; k < COLOR_DIM; ++k) {
@@ -416,6 +419,7 @@ std::tuple<
     torch::Tensor,
     torch::Tensor,
     torch::Tensor,
+    torch::Tensor,
     torch::Tensor>
 call_kernel_with_dim(
     // Gaussian parameters
@@ -498,6 +502,12 @@ call_kernel_with_dim(
         {C, image_height, image_width, 1},
         means2d.options().dtype(torch::kFloat32)
     );
+    auto visibilities_sizes = means2d.sizes().vec();
+    visibilities_sizes[means2d.dim() - 1] = 1;
+    torch::Tensor visibilities = torch::zeros(
+        visibilities_sizes,
+        means2d.options().dtype(torch::kFloat32)
+    );
 
     at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
     const uint32_t shared_mem =
@@ -548,7 +558,8 @@ call_kernel_with_dim(
             render_distort.data_ptr<float>(),
             render_median.data_ptr<float>(),
             last_ids.data_ptr<int32_t>(),
-            median_ids.data_ptr<int32_t>()
+            median_ids.data_ptr<int32_t>(),
+            visibilities.data_ptr<float>()
         );
 
     return std::make_tuple(
@@ -560,11 +571,13 @@ call_kernel_with_dim(
         render_distort,
         render_median,
         last_ids,
-        median_ids
+        median_ids,
+        visibilities
     );
 }
 
 std::tuple<
+    torch::Tensor,
     torch::Tensor,
     torch::Tensor,
     torch::Tensor,
