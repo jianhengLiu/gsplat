@@ -88,7 +88,8 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
 
     vec4<T> quat = glm::make_vec4(quats + gid * 4);
     vec2<T> scale = glm::make_vec2(scales + gid * 3);
-    mat3<T> P = mat3<T>(Ks[0], 0.0, Ks[2], 0.0, Ks[4], Ks[5], 0.0, 0.0, 1.0);
+    mat3<T> P =
+        mat3<T>(Ks[0], 0.0, Ks[2], 0.0, Ks[4], Ks[5], 0.0, 0.0, 1.0); // K^T
 
     mat3<T> _v_ray_transforms = mat3<T>(
         v_ray_transforms[0],
@@ -109,6 +110,18 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
     vec3<T> v_mean(0.f);
     vec2<T> v_scale(0.f);
     vec4<T> v_quat(0.f);
+    mat3<T> v_viewmat_R = mat3<T>(
+        0.f,
+        0.f,
+        0.f,
+        0.f,
+        0.f,
+        0.f,
+        0.f,
+        0.f,
+        0.f
+    );
+    vec3<T> v_viewmat_t = vec3<T>(0.f,0.f,0.f);
     compute_ray_transforms_aabb_vjp<T>(
         ray_transforms,
         v_means2d,
@@ -122,7 +135,9 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
         _v_ray_transforms,
         v_quat,
         v_scale,
-        v_mean
+        v_mean,
+        v_viewmat_R,
+        v_viewmat_t
     );
     vec3<T> v_sample = glm::make_vec3(v_samples);
     vec2<T> randn = glm::make_vec2(randns);
@@ -195,6 +210,24 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
             gpuAtomicAdd(v_scales + 1, v_scale[1]);
         }
     }
+
+    // v_viewmats is always in dense layout
+    if (v_viewmats != nullptr) {
+        auto warp_group_c = cg::labeled_partition(warp, cid);
+        warpSum(v_viewmat_R, warp_group_c);
+        warpSum(v_viewmat_t, warp_group_c);
+        if (warp_group_c.thread_rank() == 0) {
+            v_viewmats += cid * 16;
+            GSPLAT_PRAGMA_UNROLL
+            for (uint32_t i = 0; i < 3; i++) { // rows
+                GSPLAT_PRAGMA_UNROLL
+                for (uint32_t j = 0; j < 3; j++) { // cols
+                    gpuAtomicAdd(v_viewmats + i * 4 + j, v_viewmat_R[j][i]);
+                }
+                gpuAtomicAdd(v_viewmats + i * 4 + 3, v_viewmat_t[i]);
+            }
+        }
+    }
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -221,7 +254,6 @@ fully_fused_projection_packed_bwd_2dgs_tensor(
     const bool viewmats_requires_grad,
     const bool sparse_grad
 ) {
-
     GSPLAT_DEVICE_GUARD(means);
     GSPLAT_CHECK_INPUT(means);
     GSPLAT_CHECK_INPUT(quats);

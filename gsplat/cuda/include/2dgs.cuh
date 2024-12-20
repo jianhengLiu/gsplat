@@ -22,7 +22,9 @@ inline __device__ void compute_ray_transforms_aabb_vjp(
     mat3<T> &_v_ray_transforms,
     vec4<T> &v_quat,
     vec2<T> &v_scale,
-    vec3<T> &v_mean
+    vec3<T> &v_mean,
+    mat3<T> &v_viewmat_R,
+    vec3<T> &v_viewmat_t
 ) {
     if (v_means2d[0] != 0 || v_means2d[1] != 0) {
         const T distance = ray_transforms[6] * ray_transforms[6] + ray_transforms[7] * ray_transforms[7] -
@@ -71,6 +73,12 @@ inline __device__ void compute_ray_transforms_aabb_vjp(
     v_scale[1] += (T)glm::dot(v_RS[1], R[1]);
 
     v_mean += v_RS[2];
+
+    v_viewmat_R[2] += v_tn;
+    mat3<T> v_viewmat = R * v_M;
+    v_viewmat_R[0] += v_viewmat[0];
+    v_viewmat_R[1] += v_viewmat[1];
+    v_viewmat_t += v_viewmat[2];
 }
 
 } // namespace gsplat

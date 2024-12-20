@@ -102,6 +102,8 @@ __global__ void fully_fused_projection_bwd_2dgs_kernel(
     vec3<T> v_mean(0.f);
     vec2<T> v_scale(0.f);
     vec4<T> v_quat(0.f);
+    mat3<T> v_viewmat_R(0.f);
+    vec3<T> v_viewmat_t(0.f);
     compute_ray_transforms_aabb_vjp(
         ray_transforms,
         v_means2d,
@@ -115,7 +117,9 @@ __global__ void fully_fused_projection_bwd_2dgs_kernel(
         _v_ray_transforms,
         v_quat,
         v_scale,
-        v_mean
+        v_mean,
+        v_viewmat_R,
+        v_viewmat_t
     );
 
     // #if __CUDA_ARCH__ >= 700
