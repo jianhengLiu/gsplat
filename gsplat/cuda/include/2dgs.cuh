@@ -1,8 +1,8 @@
 #ifndef GSPLAT_CUDA_2DGS_CUH
 #define GSPLAT_CUDA_2DGS_CUH
 
-#include "types.cuh"
 #include "quat.cuh"
+#include "types.cuh"
 
 #define FILTER_INV_SQUARE 2.0f
 
@@ -27,7 +27,8 @@ inline __device__ void compute_ray_transforms_aabb_vjp(
     vec3<T> &v_viewmat_t
 ) {
     if (v_means2d[0] != 0 || v_means2d[1] != 0) {
-        const T distance = ray_transforms[6] * ray_transforms[6] + ray_transforms[7] * ray_transforms[7] -
+        const T distance = ray_transforms[6] * ray_transforms[6] +
+                           ray_transforms[7] * ray_transforms[7] -
                            ray_transforms[8] * ray_transforms[8];
         const T f = 1 / (distance);
         const T dpx_dT00 = f * ray_transforms[6];
@@ -36,12 +37,24 @@ inline __device__ void compute_ray_transforms_aabb_vjp(
         const T dpy_dT10 = f * ray_transforms[6];
         const T dpy_dT11 = f * ray_transforms[7];
         const T dpy_dT12 = -f * ray_transforms[8];
-        const T dpx_dT30 = ray_transforms[0] * (f - 2 * f * f * ray_transforms[6] * ray_transforms[6]);
-        const T dpx_dT31 = ray_transforms[1] * (f - 2 * f * f * ray_transforms[7] * ray_transforms[7]);
-        const T dpx_dT32 = -ray_transforms[2] * (f + 2 * f * f * ray_transforms[8] * ray_transforms[8]);
-        const T dpy_dT30 = ray_transforms[3] * (f - 2 * f * f * ray_transforms[6] * ray_transforms[6]);
-        const T dpy_dT31 = ray_transforms[4] * (f - 2 * f * f * ray_transforms[7] * ray_transforms[7]);
-        const T dpy_dT32 = -ray_transforms[5] * (f + 2 * f * f * ray_transforms[8] * ray_transforms[8]);
+        const T dpx_dT30 =
+            ray_transforms[0] *
+            (f - 2 * f * f * ray_transforms[6] * ray_transforms[6]);
+        const T dpx_dT31 =
+            ray_transforms[1] *
+            (f - 2 * f * f * ray_transforms[7] * ray_transforms[7]);
+        const T dpx_dT32 =
+            -ray_transforms[2] *
+            (f + 2 * f * f * ray_transforms[8] * ray_transforms[8]);
+        const T dpy_dT30 =
+            ray_transforms[3] *
+            (f - 2 * f * f * ray_transforms[6] * ray_transforms[6]);
+        const T dpy_dT31 =
+            ray_transforms[4] *
+            (f - 2 * f * f * ray_transforms[7] * ray_transforms[7]);
+        const T dpy_dT32 =
+            -ray_transforms[5] *
+            (f + 2 * f * f * ray_transforms[8] * ray_transforms[8]);
 
         _v_ray_transforms[0][0] += v_means2d[0] * dpx_dT00;
         _v_ray_transforms[0][1] += v_means2d[0] * dpx_dT01;
@@ -49,13 +62,16 @@ inline __device__ void compute_ray_transforms_aabb_vjp(
         _v_ray_transforms[1][0] += v_means2d[1] * dpy_dT10;
         _v_ray_transforms[1][1] += v_means2d[1] * dpy_dT11;
         _v_ray_transforms[1][2] += v_means2d[1] * dpy_dT12;
-        _v_ray_transforms[2][0] += v_means2d[0] * dpx_dT30 + v_means2d[1] * dpy_dT30;
-        _v_ray_transforms[2][1] += v_means2d[0] * dpx_dT31 + v_means2d[1] * dpy_dT31;
-        _v_ray_transforms[2][2] += v_means2d[0] * dpx_dT32 + v_means2d[1] * dpy_dT32;
+        _v_ray_transforms[2][0] +=
+            v_means2d[0] * dpx_dT30 + v_means2d[1] * dpy_dT30;
+        _v_ray_transforms[2][1] +=
+            v_means2d[0] * dpx_dT31 + v_means2d[1] * dpy_dT31;
+        _v_ray_transforms[2][2] +=
+            v_means2d[0] * dpx_dT32 + v_means2d[1] * dpy_dT32;
     }
 
     mat3<T> R = quat_to_rotmat(quat);
-    mat3<T> v_M = P * glm::transpose(_v_ray_transforms);
+    mat3<T> v_M = P * glm::transpose(_v_ray_transforms); // transpos dM
     mat3<T> W_t = glm::transpose(W);
     mat3<T> v_RS = W_t * v_M;
     vec3<T> v_tn = W_t * v_normals;
@@ -74,11 +90,23 @@ inline __device__ void compute_ray_transforms_aabb_vjp(
 
     v_mean += v_RS[2];
 
-    v_viewmat_R[2] += v_tn;
-    mat3<T> v_viewmat = R * v_M;
-    v_viewmat_R[0] += v_viewmat[0];
-    v_viewmat_R[1] += v_viewmat[1];
-    v_viewmat_t += v_viewmat[2];
+    vec3<T> mn = v_normals * multiplier;
+    v_viewmat_R[0][0] += mn[0] * R[2][0];
+    v_viewmat_R[0][1] += mn[1] * R[2][0];
+    v_viewmat_R[0][2] += mn[2] * R[2][0];
+    v_viewmat_R[1][0] += mn[0] * R[2][1];
+    v_viewmat_R[1][1] += mn[1] * R[2][1];
+    v_viewmat_R[1][2] += mn[2] * R[2][1];
+    v_viewmat_R[2][0] += mn[0] * R[2][2];
+    v_viewmat_R[2][1] += mn[1] * R[2][2];
+    v_viewmat_R[2][2] += mn[2] * R[2][2];
+
+    vec3<T> v_viewmat_R_vec = scale[0] * R[0] + scale[1] * R[1] + mean_c;
+    mat3<T> v_M_R = P *
+                    mat3<T>(v_viewmat_R_vec, v_viewmat_R_vec, v_viewmat_R_vec) *
+                    glm::transpose(_v_ray_transforms); // transpos dM
+    v_viewmat_R += v_M_R;
+    v_viewmat_t += P * _v_ray_transforms[2];
 }
 
 } // namespace gsplat

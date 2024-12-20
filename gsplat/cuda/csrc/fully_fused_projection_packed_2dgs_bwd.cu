@@ -110,18 +110,8 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
     vec3<T> v_mean(0.f);
     vec2<T> v_scale(0.f);
     vec4<T> v_quat(0.f);
-    mat3<T> v_viewmat_R = mat3<T>(
-        0.f,
-        0.f,
-        0.f,
-        0.f,
-        0.f,
-        0.f,
-        0.f,
-        0.f,
-        0.f
-    );
-    vec3<T> v_viewmat_t = vec3<T>(0.f,0.f,0.f);
+    mat3<T> v_viewmat_R(0.f);
+    vec3<T> v_viewmat_t(0.f);
     compute_ray_transforms_aabb_vjp<T>(
         ray_transforms,
         v_means2d,
@@ -213,6 +203,7 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
 
     // v_viewmats is always in dense layout
     if (v_viewmats != nullptr) {
+        // Each warp group, contains threads that share the same label.
         auto warp_group_c = cg::labeled_partition(warp, cid);
         warpSum(v_viewmat_R, warp_group_c);
         warpSum(v_viewmat_t, warp_group_c);
