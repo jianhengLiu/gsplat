@@ -1720,6 +1720,7 @@ def rasterize_to_pixels_2dgs(
 
     (
         render_colors,
+        render_depths,
         render_alphas,
         render_normals,
         render_distort,
@@ -1745,7 +1746,14 @@ def rasterize_to_pixels_2dgs(
     if padded_channels > 0:
         render_colors = render_colors[..., :-padded_channels]
 
-    return render_colors, render_alphas, render_normals, render_distort, render_median
+    return (
+        render_colors,
+        render_depths,
+        render_alphas,
+        render_normals,
+        render_distort,
+        render_median,
+    )
 
 
 @torch.no_grad()
@@ -1849,12 +1857,15 @@ class _RasterizeToPixels2DGS(torch.autograd.Function):
     ) -> Tuple[Tensor, Tensor]:
         (
             render_colors,
+            render_depths,
             render_alphas,
+            render_Ts,
             render_normals,
             render_distort,
             render_median,
             last_ids,
             median_ids,
+            visibiilities,
         ) = _make_lazy_cuda_func("rasterize_to_pixels_fwd_2dgs")(
             means2d,
             ray_transforms,
@@ -1882,7 +1893,9 @@ class _RasterizeToPixels2DGS(torch.autograd.Function):
             isect_offsets,
             flatten_ids,
             render_colors,
+            render_depths,
             render_alphas,
+            render_Ts,
             last_ids,
             median_ids,
         )
@@ -1896,6 +1909,7 @@ class _RasterizeToPixels2DGS(torch.autograd.Function):
         render_alphas = render_alphas.float()
         return (
             render_colors,
+            render_depths,
             render_alphas,
             render_normals,
             render_distort,
@@ -1906,6 +1920,7 @@ class _RasterizeToPixels2DGS(torch.autograd.Function):
     def backward(
         ctx,
         v_render_colors: Tensor,
+        v_render_depths: Tensor,
         v_render_alphas: Tensor,
         v_render_normals: Tensor,
         v_render_distort: Tensor,
@@ -1924,7 +1939,9 @@ class _RasterizeToPixels2DGS(torch.autograd.Function):
             isect_offsets,
             flatten_ids,
             render_colors,
+            render_depths,
             render_alphas,
+            render_Ts,
             last_ids,
             median_ids,
         ) = ctx.saved_tensors
@@ -1956,10 +1973,13 @@ class _RasterizeToPixels2DGS(torch.autograd.Function):
             isect_offsets,
             flatten_ids,
             render_colors,
+            render_depths,
             render_alphas,
+            render_Ts,
             last_ids,
             median_ids,
             v_render_colors.contiguous(),
+            v_render_depths.contiguous(),
             v_render_alphas.contiguous(),
             v_render_normals.contiguous(),
             v_render_distort.contiguous(),
@@ -1985,12 +2005,12 @@ class _RasterizeToPixels2DGS(torch.autograd.Function):
             v_normals,
             v_densify,
             v_backgrounds,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            None,  # masks
+            None,  # width
+            None,  # height
+            None,  # tile_size
+            None,  # isect_offsets
+            None,  # flatten_ids
+            None,  # absgrad
+            None,  # distloss
         )

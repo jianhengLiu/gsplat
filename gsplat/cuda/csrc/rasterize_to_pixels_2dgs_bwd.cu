@@ -487,9 +487,9 @@ __global__ void rasterize_to_pixels_bwd_2dgs_kernel(
                     // v_depth += 2.0f * fac * (m * final_A - final_C) * v_distort;
                     
                     // extremely unstable
-                    // S dl_dw = (m * m * final_A + final_B - 2 * m * final_C) * v_distort;
-                    // v_alpha += dl_dw - last_dl_dT; 
-                    // last_dl_dT = dl_dw * alpha + (1.0f - alpha) * last_dl_dT;
+                    S dl_dw = (m * m * final_A + final_B - 2 * m * final_C) * v_distort;
+                    v_alpha += dl_dw - last_dl_dT; 
+                    last_dl_dT = dl_dw * alpha + (1.0f - alpha) * last_dl_dT;
                 }
 
                 /** ==================================================

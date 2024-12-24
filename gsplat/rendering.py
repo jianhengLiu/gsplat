@@ -1230,17 +1230,21 @@ def rasterization_2dgs(
         # make it apple-to-apple with Inria's CUDA Backend.
         colors = torch.clamp_min(colors + 0.5, 0.0)
 
-    # Rasterize to pixels
-    if render_mode in ["RGB+D", "RGB+ED"]:
-        colors = torch.cat((colors, depths[..., None]), dim=-1)
-        # backgrounds = torch.cat((backgrounds, torch.zeros((C, 1), device="cuda")), dim=-1)
-    elif render_mode in ["D", "ED"]:
-        colors = depths[..., None]
-    else:  # RGB
-        pass
+    # # Rasterize to pixels
+    # if render_mode in ["RGB+D", "RGB+ED"]:
+    #     colors = torch.cat((colors, depths[..., None]), dim=-1)
+    #     backgrounds = torch.cat(
+    #         (backgrounds, torch.zeros((C, 1), device="cuda")), dim=-1
+    #     )
+    # elif render_mode in ["D", "ED"]:
+    #     colors = depths[..., None]
+    #     backgrounds = backgrounds[:, :1]
+    # else:  # RGB
+    #     pass
 
     (
         render_colors,
+        render_depths,
         render_alphas,
         render_normals,
         render_distort,
@@ -1273,9 +1277,8 @@ def rasterization_2dgs(
             dim=-1,
         )
     if render_mode in ["RGB+ED", "RGB+D"]:
-        # render_depths = render_colors[..., -1:]
         if depth_mode == "expected":
-            depth_for_normal = render_colors[..., -1:]
+            depth_for_normal = render_depths
         elif depth_mode == "median":
             depth_for_normal = render_median
 
@@ -1312,6 +1315,7 @@ def rasterization_2dgs(
 
     return (
         render_colors,
+        render_depths,
         render_alphas,
         render_normals,
         render_normals_from_depth,
