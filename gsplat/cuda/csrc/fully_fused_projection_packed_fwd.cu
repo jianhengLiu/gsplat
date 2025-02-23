@@ -1,8 +1,8 @@
 #include "bindings.h"
-#include "utils.cuh"
-#include "quat_scale_to_covar_preci.cuh"
 #include "proj.cuh"
+#include "quat_scale_to_covar_preci.cuh"
 #include "transform.cuh"
+#include "utils.cuh"
 
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
@@ -35,10 +35,10 @@ __global__ void fully_fused_projection_packed_fwd_kernel(
     const T far_plane,
     const T radius_clip,
     const int32_t
-        *__restrict__ block_accum,    // [C * blocks_per_row] packing helper
+        *__restrict__ block_accum, // [C * blocks_per_row] packing helper
     const CameraModelType camera_model,
     // outputs
-    int32_t *__restrict__ block_cnts, // [C * blocks_per_row] packing helper
+    int32_t *__restrict__ block_cnts,   // [C * blocks_per_row] packing helper
     int32_t *__restrict__ indptr,       // [C + 1]
     int64_t *__restrict__ camera_ids,   // [nnz]
     int64_t *__restrict__ gaussian_ids, // [nnz]
@@ -46,7 +46,9 @@ __global__ void fully_fused_projection_packed_fwd_kernel(
     T *__restrict__ means2d,            // [nnz, 2]
     T *__restrict__ depths,             // [nnz]
     T *__restrict__ conics,             // [nnz, 3]
-    T *__restrict__ compensations       // [nnz] optional
+    T *__restrict__ compensations,      // [nnz] optional
+    T *__restrict__ randns,             // [nnz, 3]
+    T *__restrict__ samples             // [nnz, 3]
 ) {
     int32_t blocks_per_row = gridDim.x;
 
@@ -93,6 +95,7 @@ __global__ void fully_fused_projection_packed_fwd_kernel(
     mat2<T> covar2d_inv;
     T compensation;
     T det;
+    mat3<T> RS_world;
     if (valid) {
         // transform Gaussian covariance to camera space
         mat3<T> covar;
@@ -110,6 +113,14 @@ __global__ void fully_fused_projection_packed_fwd_kernel(
                 covars[4],
                 covars[5] // 3rd column
             );
+            quats += col_idx * 4;
+            scales += col_idx * 3;
+            mat3<T> R = quat_to_rotmat<T>(glm::make_vec4(quats));
+            vec3<T> scale = glm::make_vec3(scales);
+            mat3<T> S = mat3<T>(
+                scale[0], 0.f, 0.f, 0.f, scale[1], 0.f, 0.f, 0.f, scale[2]
+            );
+            RS_world = R * S;
         } else {
             // if not then compute it from quaternions and scales
             quats += col_idx * 4;
@@ -117,54 +128,61 @@ __global__ void fully_fused_projection_packed_fwd_kernel(
             quat_scale_to_covar_preci<T>(
                 glm::make_vec4(quats), glm::make_vec3(scales), &covar, nullptr
             );
+
+            mat3<T> R = quat_to_rotmat<T>(glm::make_vec4(quats));
+            vec3<T> scale = glm::make_vec3(scales);
+            mat3<T> S = mat3<T>(
+                scale[0], 0.f, 0.f, 0.f, scale[1], 0.f, 0.f, 0.f, scale[2]
+            );
+            RS_world = R * S;
         }
         mat3<T> covar_c;
         covar_world_to_cam(R, covar, covar_c);
-        
+
         Ks += row_idx * 9;
         switch (camera_model) {
-            case CameraModelType::PINHOLE: // perspective projection
-                persp_proj<T>(
-                    mean_c,
-                    covar_c,
-                    Ks[0],
-                    Ks[4],
-                    Ks[2],
-                    Ks[5],
-                    image_width,
-                    image_height,
-                    covar2d,
-                    mean2d
-                );
-                break;
-            case CameraModelType::ORTHO: // orthographic projection
-                ortho_proj<T>(
-                    mean_c,
-                    covar_c,
-                    Ks[0],
-                    Ks[4],
-                    Ks[2],
-                    Ks[5],
-                    image_width,
-                    image_height,
-                    covar2d,
-                    mean2d
-                );
-                break;
-            case CameraModelType::FISHEYE: // fisheye projection
-                fisheye_proj<T>(
-                    mean_c,
-                    covar_c,
-                    Ks[0],
-                    Ks[4],
-                    Ks[2],
-                    Ks[5],
-                    image_width,
-                    image_height,
-                    covar2d,
-                    mean2d
-                );
-                break;
+        case CameraModelType::PINHOLE: // perspective projection
+            persp_proj<T>(
+                mean_c,
+                covar_c,
+                Ks[0],
+                Ks[4],
+                Ks[2],
+                Ks[5],
+                image_width,
+                image_height,
+                covar2d,
+                mean2d
+            );
+            break;
+        case CameraModelType::ORTHO: // orthographic projection
+            ortho_proj<T>(
+                mean_c,
+                covar_c,
+                Ks[0],
+                Ks[4],
+                Ks[2],
+                Ks[5],
+                image_width,
+                image_height,
+                covar2d,
+                mean2d
+            );
+            break;
+        case CameraModelType::FISHEYE: // fisheye projection
+            fisheye_proj<T>(
+                mean_c,
+                covar_c,
+                Ks[0],
+                Ks[4],
+                Ks[2],
+                Ks[5],
+                image_width,
+                image_height,
+                covar2d,
+                mean2d
+            );
+            break;
         }
 
         det = add_blur(eps2d, covar2d, compensation);
@@ -235,6 +253,14 @@ __global__ void fully_fused_projection_packed_fwd_kernel(
             if (compensations != nullptr) {
                 compensations[thread_data] = compensation;
             }
+            // sample point
+            vec3<T> sample = RS_world[0] * randns[thread_data * 3] +
+                             RS_world[1] * randns[thread_data * 3 + 1] +
+                             RS_world[2] * randns[thread_data * 3 + 2] +
+                             glm::make_vec3(means);
+            samples[thread_data * 3] = sample.x;
+            samples[thread_data * 3 + 1] = sample.y;
+            samples[thread_data * 3 + 2] = sample.z;
         }
         // lane 0 of the first block in each row writes the indptr
         if (threadIdx.x == 0 && block_col_idx == 0) {
@@ -249,6 +275,8 @@ __global__ void fully_fused_projection_packed_fwd_kernel(
 }
 
 std::tuple<
+    torch::Tensor,
+    torch::Tensor,
     torch::Tensor,
     torch::Tensor,
     torch::Tensor,
@@ -329,6 +357,8 @@ fully_fused_projection_packed_fwd_tensor(
                 nullptr,
                 nullptr,
                 nullptr,
+                nullptr,
+                nullptr,
                 nullptr
             );
         block_accum = torch::cumsum(block_cnts, 0, torch::kInt32);
@@ -347,6 +377,8 @@ fully_fused_projection_packed_fwd_tensor(
     torch::Tensor depths = torch::empty({nnz}, means.options());
     torch::Tensor conics = torch::empty({nnz, 3}, means.options());
     torch::Tensor compensations;
+    torch::Tensor randns = torch::randn({nnz, 3}, means.options());
+    torch::Tensor samples = torch::empty({nnz, 3}, means.options());
     if (calc_compensations) {
         // we dont want NaN to appear in this tensor, so we zero intialize it
         compensations = torch::zeros({nnz}, means.options());
@@ -379,7 +411,9 @@ fully_fused_projection_packed_fwd_tensor(
                 means2d.data_ptr<float>(),
                 depths.data_ptr<float>(),
                 conics.data_ptr<float>(),
-                calc_compensations ? compensations.data_ptr<float>() : nullptr
+                calc_compensations ? compensations.data_ptr<float>() : nullptr,
+                randns.data_ptr<float>(),
+                samples.data_ptr<float>()
             );
     } else {
         indptr.fill_(0);
@@ -393,7 +427,9 @@ fully_fused_projection_packed_fwd_tensor(
         means2d,
         depths,
         conics,
-        compensations
+        compensations,
+        randns,
+        samples
     );
 }
 
