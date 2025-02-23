@@ -137,7 +137,7 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
     v_scale[0] += glm::dot(v_sample, R_gs[0] * randn[0]);
     v_scale[1] += glm::dot(v_sample, R_gs[1] * randn[1]);
     vec2<T> srandn = randn * scale;
-    mat3<T> v_R = mat3<T>(
+    mat3<T> v_R_gs = mat3<T>(
         // First column
         v_sample[0] * srandn[0],
         v_sample[1] * srandn[0],
@@ -151,7 +151,7 @@ __global__ void fully_fused_projection_packed_bwd_2dgs_kernel(
         0.0,
         0.0
     );
-    quat_to_rotmat_vjp<T>(quat, v_R, v_quat);
+    quat_to_rotmat_vjp<T>(quat, v_R_gs, v_quat);
 
     auto warp = cg::tiled_partition<32>(cg::this_thread_block());
     if (sparse_grad) {
