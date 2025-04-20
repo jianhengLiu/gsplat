@@ -276,6 +276,9 @@ def rasterization(
     if absgrad:
         assert not distributed, "AbsGrad is not supported in distributed mode."
 
+    # Implement the multi-GPU strategy proposed in 
+    # `On Scaling Up 3D Gaussian Splatting Training <https://arxiv.org/abs/2406.18533>`.
+    #
     # If in distributed mode, we distribute the projection computation over Gaussians
     # and the rasterize computation over cameras. So first we gather the cameras
     # from all ranks for projection.
@@ -311,6 +314,7 @@ def rasterization(
         sparse_grad=sparse_grad,
         calc_compensations=(rasterize_mode == "antialiased"),
         camera_model=camera_model,
+        opacities=opacities,  # use opacities to compute a tigher bound for radii.
     )
 
     if packed:
@@ -370,7 +374,7 @@ def rasterization(
         camtoworlds = torch.inverse(viewmats)  # [C, 4, 4]
         if packed:
             dirs = means[gaussian_ids, :] - camtoworlds[camera_ids, :3, 3]  # [nnz, 3]
-            masks = radii > 0  # [nnz]
+            masks = (radii > 0).all(dim=-1)  # [nnz]
             if colors.dim() == 3:
                 # Turn [N, K, 3] into [nnz, 3]
                 shs = colors[gaussian_ids, :, :]  # [nnz, K, 3]
@@ -380,7 +384,7 @@ def rasterization(
             colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [nnz, 3]
         else:
             dirs = means[None, :, :] - camtoworlds[:, None, :3, 3]  # [C, N, 3]
-            masks = radii > 0  # [C, N]
+            masks = (radii > 0).all(dim=-1)  # [C, N]
             if colors.dim() == 3:
                 # Turn [N, K, 3] into [C, N, K, 3]
                 shs = colors.expand(C, -1, -1, -1)  # [C, N, K, 3]
@@ -393,7 +397,7 @@ def rasterization(
 
     # If in distributed mode, we need to scatter the GSs to the destination ranks, based
     # on which cameras they are visible to, which we already figured out in the projection
-    # stage.
+    # stage. 
     if distributed:
         if packed:
             # count how many elements need to be sent to each rank
@@ -700,7 +704,7 @@ def _rasterization(
         # Colors are SH coefficients, with shape [N, K, 3] or [C, N, K, 3]
         camtoworlds = torch.inverse(viewmats)  # [C, 4, 4]
         dirs = means[None, :, :] - camtoworlds[:, None, :3, 3]  # [C, N, 3]
-        masks = radii > 0  # [C, N]
+        masks = (radii > 0).all(dim=-1)  # [C, N]
         if colors.dim() == 3:
             # Turn [N, K, 3] into [C, N, 3]
             shs = colors.expand(C, -1, -1, -1)  # [C, N, K, 3]
@@ -1225,22 +1229,23 @@ def rasterization_2dgs(
         else:
             dirs = means[None, :, :] - camtoworlds[:, None, :3, 3]
         colors = spherical_harmonics(
-            sh_degree, dirs, colors, masks=radii > 0
+            sh_degree, dirs, colors, masks=(radii > 0).all(dim=-1)
         )  # [nnz, D] or [C, N, 3]
         # make it apple-to-apple with Inria's CUDA Backend.
         colors = torch.clamp_min(colors + 0.5, 0.0)
 
-    # # Rasterize to pixels
-    # if render_mode in ["RGB+D", "RGB+ED"]:
-    #     colors = torch.cat((colors, depths[..., None]), dim=-1)
-    #     backgrounds = torch.cat(
-    #         (backgrounds, torch.zeros((C, 1), device="cuda")), dim=-1
-    #     )
-    # elif render_mode in ["D", "ED"]:
-    #     colors = depths[..., None]
-    #     backgrounds = backgrounds[:, :1]
-    # else:  # RGB
-    #     pass
+    # Rasterize to pixels
+    if render_mode in ["RGB+D", "RGB+ED"]:
+        colors = torch.cat((colors, depths[..., None]), dim=-1)
+
+        if backgrounds is not None:
+            backgrounds = torch.cat(
+                (backgrounds, torch.zeros((C, 1), device=colors.device)), dim=-1
+            )
+    elif render_mode in ["D", "ED"]:
+        colors = depths[..., None]
+    else:  # RGB
+        pass
 
     (
         render_colors,
