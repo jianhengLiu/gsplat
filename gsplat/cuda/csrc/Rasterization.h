@@ -111,6 +111,8 @@ void launch_rasterize_to_pixels_2dgs_fwd_kernel(
     // image size
     const uint32_t image_width,
     const uint32_t image_height,
+    const float near_n,
+    const float far_n,
     const uint32_t tile_size,
     // intersections
     const at::Tensor tile_offsets, // [C, tile_height, tile_width]
@@ -124,8 +126,8 @@ void launch_rasterize_to_pixels_2dgs_fwd_kernel(
     at::Tensor render_distort, // [C, image_height, image_width, 1]
     at::Tensor render_median,  // [C, image_height, image_width, 1]
     at::Tensor last_ids,       // [C, image_height, image_width]
-    at::Tensor median_ids,      // [C, image_height, image_width]
-    at::Tensor visibilities // [C, N, 1]
+    at::Tensor median_ids,     // [C, image_height, image_width]
+    at::Tensor visibilities    // [C, N, 1]
 );
 template <uint32_t CDIM>
 void launch_rasterize_to_pixels_2dgs_bwd_kernel(
@@ -141,6 +143,8 @@ void launch_rasterize_to_pixels_2dgs_bwd_kernel(
     // image size
     const uint32_t image_width,
     const uint32_t image_height,
+    const float near_n,
+    const float far_n,
     const uint32_t tile_size,
     // ray_crossions
     const at::Tensor tile_offsets, // [C, tile_height, tile_width]

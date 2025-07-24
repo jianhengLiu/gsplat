@@ -333,6 +333,8 @@ rasterize_to_pixels_2dgs_fwd(
     // image size
     const uint32_t image_width,
     const uint32_t image_height,
+    const float near_n,
+    const float far_n,
     const uint32_t tile_size,
     // intersections
     const at::Tensor tile_offsets, // [C, tile_height, tile_width]
@@ -393,6 +395,8 @@ rasterize_to_pixels_2dgs_fwd(
             masks,                                                             \
             image_width,                                                       \
             image_height,                                                      \
+            near_n,                                                            \
+            far_n,                                                             \
             tile_size,                                                         \
             tile_offsets,                                                      \
             flatten_ids,                                                       \
@@ -472,6 +476,8 @@ rasterize_to_pixels_2dgs_bwd(
     // image size
     const uint32_t image_width,
     const uint32_t image_height,
+    const float near_n,
+    const float far_n,
     const uint32_t tile_size,
     // ray_crossions
     const at::Tensor tile_offsets, // [C, tile_height, tile_width]
@@ -547,6 +553,8 @@ rasterize_to_pixels_2dgs_bwd(
             masks,                                                             \
             image_width,                                                       \
             image_height,                                                      \
+            near_n,                                                            \
+            far_n,                                                             \
             tile_size,                                                         \
             tile_offsets,                                                      \
             flatten_ids,                                                       \
