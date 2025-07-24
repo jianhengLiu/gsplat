@@ -45,6 +45,8 @@ __global__ void rasterize_to_pixels_2dgs_fwd_kernel(
                                     // tiles.
     const uint32_t image_width,
     const uint32_t image_height,
+    const float &near_n,
+    const float &far_n,
     const uint32_t tile_size,
     const uint32_t tile_width,
     const uint32_t tile_height,
@@ -58,7 +60,6 @@ __global__ void rasterize_to_pixels_2dgs_fwd_kernel(
     const int32_t *__restrict__ flatten_ids, // [n_isects] // The global flatten
                                              // indices in [C * N] or [nnz] from
                                              // `isect_tiles()`.
-
     // outputs
     scalar_t
         *__restrict__ render_colors, // [C, image_height, image_width, CDIM]
@@ -371,12 +372,7 @@ __global__ void rasterize_to_pixels_2dgs_fwd_kernel(
             // merge ray-intersection kernel and 2d gaussian kernel
             const float gauss_weight = min(gauss_weight_3d, gauss_weight_2d);
 
-            float depth = (gauss_weight_3d < gauss_weight_2d)
-                              ? s.x * w_M.x + s.y * w_M.y + w_M.z
-                              : w_M.z;
-            // float depth = s.x * w_M.x + s.y * w_M.y + w_M.z;
-            const float near_n = 0.05f; // TODO: use k_near
-            const float far_n = 100.f;  // TODO: use k_near
+            float depth = s.x * w_M.x + s.y * w_M.y + w_M.z;
             if (depth < near_n) {
                 continue;
             }
@@ -495,6 +491,8 @@ void launch_rasterize_to_pixels_2dgs_fwd_kernel(
     // image size
     const uint32_t image_width,
     const uint32_t image_height,
+    const float &near_n,
+    const float &far_n,
     const uint32_t tile_size,
     // intersections
     const at::Tensor tile_offsets, // [C, tile_height, tile_width]
@@ -559,6 +557,8 @@ void launch_rasterize_to_pixels_2dgs_fwd_kernel(
             masks.has_value() ? masks.value().data_ptr<bool>() : nullptr,
             image_width,
             image_height,
+            near_n,
+            far_n,
             tile_size,
             tile_width,
             tile_height,
@@ -591,6 +591,8 @@ void launch_rasterize_to_pixels_2dgs_fwd_kernel(
         const at::optional<at::Tensor> masks,                                  \
         uint32_t image_width,                                                  \
         uint32_t image_height,                                                 \
+        const float &near_n,                                                   \
+        const float &far_n,                                                    \
         uint32_t tile_size,                                                    \
         const at::Tensor tile_offsets,                                         \
         const at::Tensor flatten_ids,                                          \
