@@ -361,14 +361,8 @@ __global__ void rasterize_to_pixels_2dgs_fwd_kernel(
             // point of interseciton in uv space
             const float gauss_weight_3d = s.x * s.x + s.y * s.y;
 
-            // projected gaussian kernel
-            const vec2 d = {xy_opac.x - px, xy_opac.y - py};
-            // #define FILTER_INV_SQUARE_2DGS 2.0f
-            const float gauss_weight_2d =
-                FILTER_INV_SQUARE_2DGS * (d.x * d.x + d.y * d.y);
-
             // merge ray-intersection kernel and 2d gaussian kernel
-            const float gauss_weight = min(gauss_weight_3d, gauss_weight_2d);
+            const float gauss_weight = gauss_weight_3d;
 
             float depth = s.x * w_M.x + s.y * w_M.y + w_M.z;
             const float near_n = 0.05f; // TODO: use k_near
