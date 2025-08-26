@@ -548,7 +548,7 @@ __global__ void rasterize_to_pixels_2dgs_bwd_kernel(
                     float dl_dw =
                         (m * m * final_A + final_B - 2 * m * final_C) *
                         v_distort;
-                    v_alpha += dl_dw - last_dl_dT;
+                    v_alpha += T * (dl_dw - last_dl_dT);
                     last_dl_dT = dl_dw * alpha + (1.0f - alpha) * last_dl_dT;
                 }
 
